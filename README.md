@@ -2,34 +2,19 @@
 
 A Java 17 CLI for exploring HTTP load testing. It supports closed-loop and open-loop traffic and has no third-party runtime dependencies. Built as a local, portfolio-focused project—not a hosted service.
 
-## Build and run
-
-Requires JDK 17+ and Maven.
-
-```bash
-mvn test
-mvn package
-java -jar target/mini-load-tester.jar --url http://localhost:8080/ -c 50 -d 30s
-```
-
-After building, run the packaged JAR:
-
-```bash
-java -jar target/mini-load-tester.jar --url http://localhost:8080/ -c 50 -d 30s
-```
 
 ## Load models
 
 **Closed-loop** (`-c`): each virtual user waits for a response before sending another request.
 
 ```bash
-./run.sh --url http://localhost:8080/ -c 50 -d 30s
+-c 50 -d 30s
 ```
 
 **Open-loop** (`-r`): schedules requests at a target rate. `-c` sets the maximum in-flight requests. Arrivals are skipped—not queued—when the cap is full, and the report shows the drop count.
 
 ```bash
-./run.sh --url http://localhost:8080/ -r 200 -c 500 -d 2m
+-r 200 -c 500 -d 2m
 ```
 
 ## Options
@@ -52,9 +37,14 @@ java -jar target/mini-load-tester.jar --url http://localhost:8080/ -c 50 -d 30s
 
 Use `--help` for defaults and ramp-up syntax. Results include request counts, errors, throughput, status codes, and latency percentiles.
 
-## Choose a test target
+## Build and run
 
-Use the built-in server for a local test, or point the tester at your own API endpoint.
+Requires JDK 17+ and Maven.
+
+```bash
+mvn test
+mvn package
+```
 
 ### Built-in demo server
 
