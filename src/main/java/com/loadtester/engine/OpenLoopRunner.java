@@ -4,13 +4,11 @@ import com.loadtester.config.TestConfig;
 import com.loadtester.http.RequestExecutor;
 import com.loadtester.http.RequestOutcome;
 import com.loadtester.metrics.MetricsCollector;
+import com.loadtester.util.NamedDaemonThreads;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -35,58 +33,70 @@ public final class OpenLoopRunner {
         int maxInFlight = config.concurrency();
         Semaphore inFlightPermits = new Semaphore(maxInFlight);
 
-        // A cached pool is fine because the semaphore caps in-flight work.
-        ExecutorService dispatchPool = Executors.newCachedThreadPool(daemonThreadFactory("dispatch-worker"));
+        // The scheduler never waits for a permit; arrivals that exceed the cap are recorded as dropped.
+        ExecutorService dispatchPool = NamedDaemonThreads.newCachedThreadPool("dispatch-worker");
 
         // Start scheduling from the warmup start so warmup traffic is real.
         long nextSendTimeNanos = warmupStartNanos;
 
-        while (true) {
-            long now = System.nanoTime();
-            if (now >= testEndNanos) {
-                break;
-            }
-
-            sleepUntil(nextSendTimeNanos);
-
-            long intendedSendTime = nextSendTimeNanos;
-
-            // Keep the warmup rate at the starting ramp value.
-            double currentRate;
-            if (intendedSendTime < measurementStartNanos) {
-                currentRate = Math.max(rampUpStrategy.getTarget(0), 0.01);
-            } else {
-                long elapsedMillis = (intendedSendTime - measurementStartNanos) / 1_000_000;
-                currentRate = Math.max(rampUpStrategy.getTarget(elapsedMillis), 0.01);
-            }
-            long intervalNanos = (long) (1_000_000_000.0 / currentRate);
-            nextSendTimeNanos += intervalNanos;
-
-            // Acquire a permit before dispatching so overload shows up in the metrics.
-            long acquireStartNanos = System.nanoTime();
-            inFlightPermits.acquire();
-            long schedulerStallNanos = System.nanoTime() - acquireStartNanos;
-            if (schedulerStallNanos > 1_000_000L) {
-                // The scheduler stalled waiting for capacity; the target may be saturated.
-            }
-
-            dispatchPool.submit(() -> {
-                try {
-                    RequestOutcome outcome = executor.execute(intendedSendTime);
-                    collector.recordOutcome(outcome);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    inFlightPermits.release();
+        try {
+            while (true) {
+                long now = System.nanoTime();
+                if (now >= testEndNanos) {
+                    break;
                 }
-            });
-        }
 
-        dispatchPool.shutdown();
-        boolean finished = dispatchPool.awaitTermination(
-                config.requestTimeout().toSeconds() + 5, TimeUnit.SECONDS);
-        if (!finished) {
+                sleepUntil(nextSendTimeNanos);
+                if (System.nanoTime() >= testEndNanos) {
+                    break;
+                }
+
+                long intendedSendTime = nextSendTimeNanos;
+
+                double currentRate;
+                if (intendedSendTime < measurementStartNanos) {
+                    currentRate = rampUpStrategy.getTarget(0);
+                } else {
+                    long elapsedMillis = (intendedSendTime - measurementStartNanos) / 1_000_000;
+                    currentRate = rampUpStrategy.getTarget(elapsedMillis);
+                }
+
+                if (currentRate <= 0) {
+                    nextSendTimeNanos = System.nanoTime() + 1_000_000L;
+                    continue;
+                }
+                long intervalNanos = Math.max(1L, (long) (1_000_000_000.0 / currentRate));
+                nextSendTimeNanos += intervalNanos;
+
+                if (!inFlightPermits.tryAcquire()) {
+                    collector.recordDropped(intendedSendTime);
+                    continue;
+                }
+
+                dispatchPool.submit(() -> {
+                    try {
+                        RequestOutcome outcome = executor.execute(intendedSendTime);
+                        collector.recordOutcome(outcome);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        inFlightPermits.release();
+                    }
+                });
+            }
+
+            dispatchPool.shutdown();
+            boolean finished = dispatchPool.awaitTermination(
+                    config.requestTimeout().toSeconds() + 5, TimeUnit.SECONDS);
+            if (!finished) {
+                dispatchPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
             dispatchPool.shutdownNow();
+            throw e;
+        } catch (RuntimeException e) {
+            dispatchPool.shutdownNow();
+            throw e;
         }
     }
 
@@ -112,12 +122,4 @@ public final class OpenLoopRunner {
         }
     }
 
-    private static ThreadFactory daemonThreadFactory(String namePrefix) {
-        AtomicInteger counter = new AtomicInteger(0);
-        return runnable -> {
-            Thread t = new Thread(runnable, namePrefix + "-" + counter.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        };
-    }
 }

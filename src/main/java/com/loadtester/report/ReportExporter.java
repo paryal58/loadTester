@@ -20,10 +20,21 @@ public final class ReportExporter {
 
     /** Writes results to the given output file. */
     public static void export(TestResults results, Path outputFile) {
+        if (outputFile.getFileName() == null) {
+            throw new IllegalArgumentException("Output path must include a file name");
+        }
         String fileName = outputFile.getFileName().toString().toLowerCase();
-        String content = fileName.endsWith(".csv") ? toCsv(results) : toJson(results);
+        String content = switch (fileName.substring(fileName.lastIndexOf('.') + 1)) {
+            case "csv" -> toCsv(results);
+            case "json" -> toJson(results);
+            default -> throw new IllegalArgumentException("Output file must end in .json or .csv: " + outputFile);
+        };
 
         try {
+            Path parent = outputFile.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
             Files.writeString(outputFile, content, StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to write report to " + outputFile, e);
@@ -40,6 +51,7 @@ public final class ReportExporter {
         appendJsonField(sb, "errorRatePercent", round2(r.errorRate() * 100), true);
         appendJsonField(sb, "measuredDurationSeconds", round2(r.actualDuration().toNanos() / 1_000_000_000.0), true);
         appendJsonField(sb, "throughputPerSecond", round2(r.throughputPerSecond()), true);
+        appendJsonField(sb, "droppedRequests", r.droppedRequests(), true);
 
         sb.append("  \"latencyMs\": {\n");
         appendJsonField(sb, "    min", round2(FormatUtils.nanosToMillis(r.minLatencyNanos())), true);
@@ -72,24 +84,46 @@ public final class ReportExporter {
     }
 
     private static void appendIntMapEntries(StringBuilder sb, Map<Integer, Long> map) {
+        Map<Integer, Long> sorted = new java.util.TreeMap<>(map);
         int i = 0;
-        for (Map.Entry<Integer, Long> entry : map.entrySet()) {
+        for (Map.Entry<Integer, Long> entry : sorted.entrySet()) {
             String key = entry.getKey() == -1 ? "no_response" : String.valueOf(entry.getKey());
             sb.append("    \"").append(key).append("\": ").append(entry.getValue());
-            sb.append(++i < map.size() ? ",\n" : "\n");
+            sb.append(++i < sorted.size() ? ",\n" : "\n");
         }
     }
 
     private static void appendStringMapEntries(StringBuilder sb, Map<String, Long> map) {
+        Map<String, Long> sorted = new java.util.TreeMap<>(map);
         int i = 0;
-        for (Map.Entry<String, Long> entry : map.entrySet()) {
+        for (Map.Entry<String, Long> entry : sorted.entrySet()) {
             sb.append("    \"").append(escapeJson(entry.getKey())).append("\": ").append(entry.getValue());
-            sb.append(++i < map.size() ? ",\n" : "\n");
+            sb.append(++i < sorted.size() ? ",\n" : "\n");
         }
     }
 
     private static String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        StringBuilder escaped = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> escaped.append("\\\"");
+                case '\\' -> escaped.append("\\\\");
+                case '\b' -> escaped.append("\\b");
+                case '\f' -> escaped.append("\\f");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        escaped.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        escaped.append(c);
+                    }
+                }
+            }
+        }
+        return escaped.toString();
     }
 
     private static double round2(double value) {
@@ -102,7 +136,7 @@ public final class ReportExporter {
                 "totalRequests", "successCount", "errorCount", "errorRatePercent",
                 "measuredDurationSeconds", "throughputPerSecond",
                 "minMs", "p50Ms", "p75Ms", "p90Ms", "p95Ms", "p99Ms", "p999Ms", "maxMs", "meanMs",
-                "dispatchDelaySamples");
+                "dispatchDelaySamples", "droppedRequests");
 
         String row = String.join(",",
                 String.valueOf(r.totalRequests()),
@@ -120,7 +154,8 @@ public final class ReportExporter {
                 String.valueOf(round2(FormatUtils.nanosToMillis(r.p999LatencyNanos()))),
                 String.valueOf(round2(FormatUtils.nanosToMillis(r.maxLatencyNanos()))),
                 String.valueOf(round2(FormatUtils.nanosToMillis((long) r.meanLatencyNanos()))),
-                String.valueOf(r.dispatchDelaySamples())
+                String.valueOf(r.dispatchDelaySamples()),
+                String.valueOf(r.droppedRequests())
         );
 
         return header + "\n" + row + "\n";

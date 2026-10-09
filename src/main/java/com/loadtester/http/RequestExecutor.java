@@ -18,9 +18,11 @@ public final class RequestExecutor {
 
     private final HttpClient httpClient;
     private final TestConfig config;
+    private final byte[] requestBody;
 
     public RequestExecutor(TestConfig config) {
         this.config = config;
+        this.requestBody = config.requestBody();
         this.httpClient = HttpClient.newBuilder()
                 // Prefer HTTP/2 when the server supports it.
                 .version(HttpClient.Version.HTTP_2)
@@ -83,8 +85,8 @@ public final class RequestExecutor {
             builder.header(header.getKey(), header.getValue());
         }
 
-        HttpRequest.BodyPublisher bodyPublisher = config.method().supportsBody() && config.requestBody().length > 0
-                ? HttpRequest.BodyPublishers.ofByteArray(config.requestBody())
+        HttpRequest.BodyPublisher bodyPublisher = config.method().supportsBody() && requestBody.length > 0
+                ? HttpRequest.BodyPublishers.ofByteArray(requestBody)
                 : HttpRequest.BodyPublishers.noBody();
 
         builder.method(config.method().name(), bodyPublisher);

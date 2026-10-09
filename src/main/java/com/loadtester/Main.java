@@ -14,6 +14,11 @@ import com.loadtester.engine.LoadTestEngine;
 public final class Main {
 
     public static void main(String[] args) {
+        if (args.length == 1 && (args[0].equals("--help") || args[0].equals("-h"))) {
+            ArgumentParser.printUsage();
+            return;
+        }
+
         TestConfig config;
         try {
             config = ArgumentParser.parse(args);

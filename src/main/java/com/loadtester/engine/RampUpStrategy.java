@@ -64,6 +64,10 @@ public interface RampUpStrategy {
 
     /** Holds the peak value for the whole test. */
     record Constant(double peakValue) implements RampUpStrategy {
+        public Constant {
+            requireFiniteNonNegative(peakValue, "peak value");
+        }
+
         @Override
         public double getTarget(long elapsedMillis) {
             return peakValue;
@@ -74,11 +78,16 @@ public interface RampUpStrategy {
      * Ramps linearly from the start value to the peak value.
      */
     record Linear(double startValue, double peakValue, double rampSeconds) implements RampUpStrategy {
+        public Linear {
+            requireFiniteNonNegative(startValue, "start value");
+            requireFiniteNonNegative(peakValue, "peak value");
+            if (!Double.isFinite(rampSeconds) || rampSeconds <= 0) {
+                throw new IllegalArgumentException("Ramp duration must be a finite positive number");
+            }
+        }
+
         @Override
         public double getTarget(long elapsedMillis) {
-            if (rampSeconds <= 0) {
-                return peakValue;
-            }
             double elapsedSeconds = elapsedMillis / 1000.0;
             if (elapsedSeconds >= rampSeconds) {
                 return peakValue;
@@ -92,11 +101,18 @@ public interface RampUpStrategy {
      * Steps through a fixed number of load levels.
      */
     record Step(int numSteps, double stepSeconds, double peakValue) implements RampUpStrategy {
+        public Step {
+            if (numSteps < 1) {
+                throw new IllegalArgumentException("Number of steps must be >= 1");
+            }
+            if (!Double.isFinite(stepSeconds) || stepSeconds <= 0) {
+                throw new IllegalArgumentException("Step duration must be a finite positive number");
+            }
+            requireFiniteNonNegative(peakValue, "peak value");
+        }
+
         @Override
         public double getTarget(long elapsedMillis) {
-            if (numSteps <= 0 || stepSeconds <= 0) {
-                return peakValue;
-            }
             double elapsedSeconds = elapsedMillis / 1000.0;
             int currentStep = (int) (elapsedSeconds / stepSeconds) + 1; // steps are 1-indexed
             currentStep = Math.min(currentStep, numSteps);
@@ -109,12 +125,27 @@ public interface RampUpStrategy {
      */
     record Spike(double baselineValue, double peakValue, double atSecond, double spikeDurationSeconds)
             implements RampUpStrategy {
+        public Spike {
+            requireFiniteNonNegative(baselineValue, "baseline value");
+            requireFiniteNonNegative(peakValue, "peak value");
+            requireFiniteNonNegative(atSecond, "spike start");
+            if (!Double.isFinite(spikeDurationSeconds) || spikeDurationSeconds <= 0) {
+                throw new IllegalArgumentException("Spike duration must be a finite positive number");
+            }
+        }
+
         @Override
         public double getTarget(long elapsedMillis) {
             double elapsedSeconds = elapsedMillis / 1000.0;
             boolean inSpikeWindow = elapsedSeconds >= atSecond
                     && elapsedSeconds < atSecond + spikeDurationSeconds;
             return inSpikeWindow ? peakValue : baselineValue;
+        }
+    }
+
+    private static void requireFiniteNonNegative(double value, String name) {
+        if (!Double.isFinite(value) || value < 0) {
+            throw new IllegalArgumentException(name + " must be a finite non-negative number");
         }
     }
 }

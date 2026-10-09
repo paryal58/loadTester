@@ -4,13 +4,11 @@ import com.loadtester.config.TestConfig;
 import com.loadtester.metrics.MetricsCollector;
 import com.loadtester.metrics.TestResults;
 import com.loadtester.util.FormatUtils;
+import com.loadtester.util.NamedDaemonThreads;
 
 import java.util.Map;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.loadtester.util.FormatUtils.*;
 
@@ -55,12 +53,7 @@ public final class ConsoleReporter {
 
     /** Starts periodic progress output for the console. */
     public void startLiveUpdates() {
-        ThreadFactory daemonFactory = runnable -> {
-            Thread t = new Thread(runnable, "console-reporter");
-            t.setDaemon(true);
-            return t;
-        };
-        ticker = Executors.newSingleThreadScheduledExecutor(daemonFactory);
+        ticker = NamedDaemonThreads.newSingleThreadScheduledExecutor("console-reporter");
         ticker.scheduleAtFixedRate(this::printLiveLine, 1, 1, TimeUnit.SECONDS);
     }
 
@@ -69,7 +62,6 @@ public final class ConsoleReporter {
         if (ticker != null) {
             ticker.shutdownNow();
         }
-        // Move to a fresh line so the final report doesn't overwrite the last progress line.
         System.out.println();
     }
 
@@ -105,6 +97,9 @@ public final class ConsoleReporter {
         System.out.printf("%-28s %s%n", "Total requests:", withThousandsSeparator(results.totalRequests()));
         System.out.printf("%-28s %s%n", "Successful:", withThousandsSeparator(results.successCount()));
         System.out.printf("%-28s %s (%s)%n", "Errors:", withThousandsSeparator(results.errorCount()), percentage(results.errorRate()));
+        if (config.isOpenLoop()) {
+            System.out.printf("%-28s %s%n", "Dropped arrivals:", withThousandsSeparator(results.droppedRequests()));
+        }
         System.out.printf("%-28s %s%n", "Measured duration:", formatDuration(results.actualDuration()));
         System.out.printf("%-28s %s req/s%n", "Throughput:", decimal(results.throughputPerSecond(), 2));
 
@@ -138,10 +133,16 @@ public final class ConsoleReporter {
         if (config.isOpenLoop() && results.dispatchDelaySamples() > 0) {
             System.out.println();
             System.out.println("WARNING: " + withThousandsSeparator(results.dispatchDelaySamples())
-                    + " requests were dispatched more than 50ms late.");
-            System.out.println("This means the target (or your network) could not sustain the requested rate of "
-                    + config.targetRate() + " req/s at a concurrency cap of " + config.concurrency() + ".");
-            System.out.println("Consider raising --concurrency (max in-flight cap) or lowering --rate.");
+                    + " requests started more than 50ms after their scheduled arrival.");
+            System.out.println("This indicates delay in the load generator or its dispatch path.");
+            System.out.println("Check host load and lower --rate if the generator cannot keep up.");
+        }
+
+        if (config.isOpenLoop() && results.droppedRequests() > 0) {
+            System.out.println();
+            System.out.println("WARNING: " + withThousandsSeparator(results.droppedRequests())
+                    + " scheduled arrivals were skipped because the max in-flight cap was full.");
+            System.out.println("Increase --concurrency or lower --rate to avoid dropped arrivals.");
         }
 
         System.out.println("=".repeat(70));

@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * Immutable, fully-validated configuration for a single load test run.
@@ -34,6 +35,8 @@ import java.util.Objects;
  */
 public final class TestConfig {
 
+    private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
+
     private final URI targetUrl;
     private final HttpMethod method;
     private final Map<String, String> headers;
@@ -51,7 +54,7 @@ public final class TestConfig {
         this.targetUrl = b.targetUrl;
         this.method = b.method;
         this.headers = Map.copyOf(b.headers);
-        this.requestBody = b.requestBody;
+        this.requestBody = b.requestBody.clone();
         this.concurrency = b.concurrency;
         this.targetRate = b.targetRate;
         this.rampUpSpec = b.rampUpSpec;
@@ -65,7 +68,7 @@ public final class TestConfig {
     public URI targetUrl() { return targetUrl; }
     public HttpMethod method() { return method; }
     public Map<String, String> headers() { return headers; }
-    public byte[] requestBody() { return requestBody; }
+    public byte[] requestBody() { return requestBody.clone(); }
     public int concurrency() { return concurrency; }
     public Double targetRate() { return targetRate; }
     public boolean isOpenLoop() { return targetRate != null; }
@@ -101,8 +104,15 @@ public final class TestConfig {
 
         public Builder targetUrl(URI targetUrl) { this.targetUrl = targetUrl; return this; }
         public Builder method(HttpMethod method) { this.method = method; return this; }
-        public Builder addHeader(String key, String value) { this.headers.put(key, value); return this; }
-        public Builder requestBody(byte[] body) { this.requestBody = body; return this; }
+        public Builder addHeader(String key, String value) {
+            this.headers.put(Objects.requireNonNull(key, "Header name cannot be null"),
+                    Objects.requireNonNull(value, "Header value cannot be null"));
+            return this;
+        }
+        public Builder requestBody(byte[] body) {
+            this.requestBody = Objects.requireNonNull(body, "Request body cannot be null").clone();
+            return this;
+        }
         public Builder concurrency(int concurrency) { this.concurrency = concurrency; return this; }
         public Builder targetRate(Double targetRate) { this.targetRate = targetRate; return this; }
         public Builder rampUpSpec(String spec) { this.rampUpSpec = spec; return this; }
@@ -114,11 +124,22 @@ public final class TestConfig {
 
         public TestConfig build() {
             Objects.requireNonNull(targetUrl, "Target URL is required (--url)");
+            Objects.requireNonNull(method, "HTTP method is required");
+            Objects.requireNonNull(testDuration, "Test duration is required");
+            Objects.requireNonNull(warmupDuration, "Warmup duration is required");
+            Objects.requireNonNull(requestTimeout, "Request timeout is required");
+            Objects.requireNonNull(thinkTime, "Think time is required");
+
+            String scheme = targetUrl.getScheme();
+            if (!targetUrl.isAbsolute() || targetUrl.getHost() == null
+                    || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                throw new IllegalArgumentException("Target URL must be an absolute HTTP or HTTPS URL");
+            }
 
             if (concurrency < 1) {
                 throw new IllegalArgumentException("Concurrency must be >= 1, got " + concurrency);
             }
-            if (targetRate != null && targetRate <= 0) {
+            if (targetRate != null && (!Double.isFinite(targetRate) || targetRate <= 0)) {
                 throw new IllegalArgumentException("Rate must be > 0, got " + targetRate);
             }
             if (testDuration.isZero() || testDuration.isNegative()) {
@@ -129,6 +150,22 @@ public final class TestConfig {
             }
             if (requestTimeout.isZero() || requestTimeout.isNegative()) {
                 throw new IllegalArgumentException("Request timeout must be positive");
+            }
+            if (thinkTime.isNegative()) {
+                throw new IllegalArgumentException("Think time cannot be negative");
+            }
+            try {
+                Math.addExact(warmupDuration.toNanos(), testDuration.toNanos());
+                requestTimeout.toNanos();
+                thinkTime.toNanos();
+            } catch (ArithmeticException e) {
+                throw new IllegalArgumentException("Durations are too large to represent in nanoseconds", e);
+            }
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                if (!HEADER_NAME.matcher(header.getKey()).matches()
+                        || header.getValue().chars().anyMatch(c -> (c < 0x20 && c != '\t') || c == 0x7f)) {
+                    throw new IllegalArgumentException("Invalid HTTP header: " + header.getKey());
+                }
             }
             if (!method.supportsBody() && requestBody.length > 0) {
                 throw new IllegalArgumentException(

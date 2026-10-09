@@ -4,9 +4,9 @@ import com.loadtester.config.TestConfig;
 import com.loadtester.http.RequestExecutor;
 import com.loadtester.http.RequestOutcome;
 import com.loadtester.metrics.MetricsCollector;
+import com.loadtester.util.NamedDaemonThreads;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -24,20 +24,26 @@ public final class ClosedLoopRunner {
                             RampUpStrategy rampUpStrategy,
                             RequestExecutor executor,
                             MetricsCollector collector,
-                            long testStartNanos,
+                            long warmupStartNanos,
+                            long measurementStartNanos,
                             long testEndNanos) throws InterruptedException {
 
         int maxUsers = config.concurrency();
         AtomicInteger currentAllowedConcurrency = new AtomicInteger(0);
+        currentAllowedConcurrency.set(boundedConcurrency(rampUpStrategy.getTarget(0), maxUsers));
 
         // Update the active worker count from the ramp-up curve every 100ms.
-        ExecutorService rampTicker = Executors.newSingleThreadExecutor(daemonThreadFactory("ramp-ticker"));
+        ExecutorService rampTicker = NamedDaemonThreads.newSingleThreadExecutor("ramp-ticker");
+        ExecutorService workerPool = NamedDaemonThreads.newFixedThreadPool(maxUsers, "vu-worker");
         rampTicker.submit(() -> {
             try {
                 while (System.nanoTime() < testEndNanos && !Thread.currentThread().isInterrupted()) {
-                    long elapsedMillis = (System.nanoTime() - testStartNanos) / 1_000_000;
-                    int target = (int) Math.round(rampUpStrategy.getTarget(elapsedMillis));
-                    currentAllowedConcurrency.set(Math.min(Math.max(target, 0), maxUsers));
+                    long now = System.nanoTime();
+                    long elapsedMillis = now < measurementStartNanos
+                            ? 0
+                            : (now - measurementStartNanos) / 1_000_000;
+                    currentAllowedConcurrency.set(
+                            boundedConcurrency(rampUpStrategy.getTarget(elapsedMillis), maxUsers));
                     Thread.sleep(100);
                 }
             } catch (InterruptedException ignored) {
@@ -45,21 +51,19 @@ public final class ClosedLoopRunner {
             }
         });
 
-        ExecutorService workerPool = Executors.newFixedThreadPool(maxUsers, daemonThreadFactory("vu-worker"));
-        for (int workerId = 0; workerId < maxUsers; workerId++) {
-            final int id = workerId;
-            workerPool.submit(() -> runVirtualUser(id, currentAllowedConcurrency, config, executor, collector, testEndNanos));
-        }
+        try {
+            for (int workerId = 0; workerId < maxUsers; workerId++) {
+                final int id = workerId;
+                workerPool.submit(() -> runVirtualUser(
+                        id, currentAllowedConcurrency, config, executor, collector, warmupStartNanos, testEndNanos));
+            }
 
-        workerPool.shutdown();
-        // Let in-flight requests finish before shutdown.
-        boolean finished = workerPool.awaitTermination(
-                config.requestTimeout().toSeconds() + 5, TimeUnit.SECONDS);
-        if (!finished) {
+            workerPool.shutdown();
+            workerPool.awaitTermination(config.requestTimeout().toSeconds() + 5, TimeUnit.SECONDS);
+        } finally {
             workerPool.shutdownNow();
+            rampTicker.shutdownNow();
         }
-
-        rampTicker.shutdownNow();
     }
 
     private static void runVirtualUser(int workerId,
@@ -67,8 +71,12 @@ public final class ClosedLoopRunner {
                                         TestConfig config,
                                         RequestExecutor executor,
                                         MetricsCollector collector,
+                                        long warmupStartNanos,
                                         long testEndNanos) {
         try {
+            while (System.nanoTime() < warmupStartNanos) {
+                Thread.sleep(IDLE_POLL_MILLIS);
+            }
             while (System.nanoTime() < testEndNanos) {
                 if (workerId >= currentAllowedConcurrency.get()) {
                     // Wait until the ramp-up curve admits this worker.
@@ -82,7 +90,8 @@ public final class ClosedLoopRunner {
                 collector.recordOutcome(outcome);
 
                 if (!config.thinkTime().isZero()) {
-                    Thread.sleep(config.thinkTime().toMillis());
+                    long thinkTimeNanos = config.thinkTime().toNanos();
+                    Thread.sleep(thinkTimeNanos / 1_000_000L, (int) (thinkTimeNanos % 1_000_000L));
                 }
             }
         } catch (InterruptedException e) {
@@ -90,12 +99,8 @@ public final class ClosedLoopRunner {
         }
     }
 
-    private static java.util.concurrent.ThreadFactory daemonThreadFactory(String namePrefix) {
-        AtomicInteger counter = new AtomicInteger(0);
-        return runnable -> {
-            Thread t = new Thread(runnable, namePrefix + "-" + counter.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        };
+    private static int boundedConcurrency(double requestedUsers, int maximumUsers) {
+        return (int) Math.min(Math.max(Math.round(requestedUsers), 0), maximumUsers);
     }
+
 }

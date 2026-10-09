@@ -1,6 +1,8 @@
 package com.loadtester.util;
 
 import java.time.Duration;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -51,7 +53,7 @@ public final class DurationParser {
         String trimmed = input.trim();
         Matcher matcher = SEGMENT.matcher(trimmed);
 
-        long totalNanos = 0;
+        BigDecimal totalNanos = BigDecimal.ZERO;
         int lastMatchEnd = 0;
         boolean matchedAtLeastOnce = false;
 
@@ -63,9 +65,9 @@ public final class DurationParser {
                         "Unrecognized characters in duration '" + input + "' near position " + lastMatchEnd);
             }
 
-            double amount = Double.parseDouble(matcher.group(1));
+            BigDecimal amount = new BigDecimal(matcher.group(1));
             String unit = matcher.group(2);
-            totalNanos += toNanos(amount, unit);
+            totalNanos = totalNanos.add(amount.multiply(nanosPerUnit(unit)));
 
             lastMatchEnd = matcher.end();
             matchedAtLeastOnce = true;
@@ -76,15 +78,19 @@ public final class DurationParser {
                     "Could not parse duration '" + input + "'. Expected format like '30s', '5m', '1h30m'.");
         }
 
-        return Duration.ofNanos(totalNanos);
+        try {
+            return Duration.ofNanos(totalNanos.setScale(0, RoundingMode.DOWN).longValueExact());
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("Duration is too large to represent: '" + input + "'", e);
+        }
     }
 
-    private static long toNanos(double amount, String unit) {
+    private static BigDecimal nanosPerUnit(String unit) {
         return switch (unit) {
-            case "ms" -> (long) (amount * 1_000_000L);
-            case "s" -> (long) (amount * 1_000_000_000L);
-            case "m" -> (long) (amount * 60_000_000_000L);
-            case "h" -> (long) (amount * 3_600_000_000_000L);
+            case "ms" -> BigDecimal.valueOf(1_000_000L);
+            case "s" -> BigDecimal.valueOf(1_000_000_000L);
+            case "m" -> BigDecimal.valueOf(60_000_000_000L);
+            case "h" -> BigDecimal.valueOf(3_600_000_000_000L);
             default -> throw new IllegalArgumentException("Unknown duration unit: " + unit);
         };
     }

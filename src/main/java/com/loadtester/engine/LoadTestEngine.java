@@ -7,8 +7,6 @@ import com.loadtester.metrics.TestResults;
 import com.loadtester.report.ConsoleReporter;
 import com.loadtester.report.ReportExporter;
 
-import java.time.Duration;
-
 /**
  * Top-level orchestrator that ties together configuration, the HTTP
  * executor, the chosen load-generation strategy (open- or closed-loop),
@@ -52,14 +50,14 @@ public final class LoadTestEngine {
             if (config.isOpenLoop()) {
                 OpenLoopRunner.run(config, rampUpStrategy, executor, collector, testStartNanos, testStartNanos + warmupNanos, testEndNanos);
             } else {
-                ClosedLoopRunner.run(config, rampUpStrategy, executor, collector, testStartNanos + warmupNanos, testEndNanos);
+                ClosedLoopRunner.run(config, rampUpStrategy, executor, collector, testStartNanos,
+                        testStartNanos + warmupNanos, testEndNanos);
             }
         } finally {
             liveReporter.stopLiveUpdates();
         }
 
-        Duration actualMeasuredDuration = Duration.ofNanos(System.nanoTime() - (testStartNanos + warmupNanos));
-        TestResults results = collector.finalResults(actualMeasuredDuration);
+        TestResults results = collector.finalResults(config.testDuration());
 
         ConsoleReporter.printFinalReport(results, config);
 

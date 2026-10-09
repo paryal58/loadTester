@@ -16,6 +16,7 @@ public final class MetricsCollector {
     private final LongAdder totalRequests = new LongAdder();
     private final LongAdder successCount = new LongAdder();
     private final LongAdder errorCount = new LongAdder();
+    private final LongAdder droppedRequests = new LongAdder();
     private final LongAdder dispatchDelaySamples = new LongAdder();
     private final ConcurrentHashMap<Integer, LongAdder> statusCodeCounts = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LongAdder> errorTypeCounts = new ConcurrentHashMap<>();
@@ -35,7 +36,7 @@ public final class MetricsCollector {
      * Records one completed request and skips warmup samples.
      */
     public void recordOutcome(RequestOutcome outcome) {
-        if (outcome.actualEndNanos() < warmupEndNanos) {
+        if (outcome.intendedSendTimeNanos() < warmupEndNanos) {
             return; // still warming up - excluded from results by design
         }
 
@@ -57,6 +58,13 @@ public final class MetricsCollector {
         }
     }
 
+    /** Records a scheduled open-loop arrival that could not be dispatched at the in-flight cap. */
+    public void recordDropped(long intendedSendTimeNanos) {
+        if (intendedSendTimeNanos >= warmupEndNanos) {
+            droppedRequests.increment();
+        }
+    }
+
     /** Returns a lightweight snapshot for the live console line. */
     public LiveSnapshot liveSnapshot(long nowNanos) {
         long elapsedNanos = Math.max(1, nowNanos - Math.max(testStartNanos, warmupEndNanos));
@@ -72,15 +80,15 @@ public final class MetricsCollector {
     }
 
     /** Builds the final immutable test results. */
-    public TestResults finalResults(Duration actualMeasuredDuration) {
+    public TestResults finalResults(Duration measurementDuration) {
         long total = totalRequests.sum();
-        double seconds = Math.max(actualMeasuredDuration.toNanos(), 1) / 1_000_000_000.0;
+        double seconds = Math.max(measurementDuration.toNanos(), 1) / 1_000_000_000.0;
 
         return new TestResults(
                 total,
                 successCount.sum(),
                 errorCount.sum(),
-                actualMeasuredDuration,
+                measurementDuration,
                 total / seconds,
                 histogram.min(),
                 histogram.percentile(50),
@@ -93,7 +101,8 @@ public final class MetricsCollector {
                 histogram.mean(),
                 snapshotMap(statusCodeCounts),
                 snapshotMap(errorTypeCounts),
-                dispatchDelaySamples.sum()
+                dispatchDelaySamples.sum(),
+                droppedRequests.sum()
         );
     }
 

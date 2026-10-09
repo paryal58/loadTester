@@ -2,6 +2,7 @@ package com.loadtester.cli;
 
 import com.loadtester.config.HttpMethod;
 import com.loadtester.config.TestConfig;
+import com.loadtester.engine.RampUpStrategy;
 import com.loadtester.util.DurationParser;
 
 import java.io.IOException;
@@ -38,11 +39,6 @@ public final class ArgumentParser {
         while (i < remaining.size()) {
             String flag = remaining.get(i);
 
-            if (flag.equals("--help") || flag.equals("-h")) {
-                printUsage();
-                System.exit(0);
-            }
-
             String value = requireValue(remaining, i, flag);
             // Flags with values consume two tokens.
             switch (flag) {
@@ -69,13 +65,23 @@ public final class ArgumentParser {
             builder.addHeader("Content-Type", contentType);
         }
 
+        if (rawBody != null && bodyFile != null) {
+            throw new CliParseException("Use either --body or --body-file, not both.");
+        }
+
         byte[] bodyBytes = resolveBody(rawBody, bodyFile);
         if (bodyBytes.length > 0) {
             builder.requestBody(bodyBytes);
         }
 
         try {
-            return builder.build();
+            TestConfig config = builder.build();
+            try {
+                RampUpStrategy.parse(config.rampUpSpec(), config.peakLoadValue());
+            } catch (IllegalArgumentException e) {
+                throw new CliParseException("--ramp-up: " + e.getMessage());
+            }
+            return config;
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new CliParseException(e.getMessage());
         }
@@ -117,7 +123,7 @@ public final class ArgumentParser {
     private static double parsePositiveDouble(String value, String flagName) {
         try {
             double parsed = Double.parseDouble(value.trim());
-            if (parsed <= 0) {
+            if (!Double.isFinite(parsed) || parsed <= 0) {
                 throw new CliParseException(flagName + " must be a positive number, got " + value);
             }
             return parsed;
@@ -177,8 +183,9 @@ public final class ArgumentParser {
                   --concurrency, -c N           Virtual users (closed-loop) or max in-flight
                                                  requests (open-loop). Default: 10
                   --rate, -r N                  Target requests/sec. Presence of this flag
-                                                 switches the tool into OPEN-LOOP mode, which
-                                                 corrects for coordinated omission (see README).
+                                                 switches to OPEN-LOOP mode. Arrivals are
+                                                 skipped (and counted) when the in-flight cap
+                                                 is full. See README for measurement details.
                                                  Absence means CLOSED-LOOP (pure concurrency) mode.
                   --ramp-up SPEC                 Ramp-up pattern. Default: constant
                                                     constant
@@ -198,7 +205,7 @@ public final class ArgumentParser {
                   --method METHOD                GET|POST|PUT|DELETE|PATCH|HEAD. Default: GET
                   --header "Key: Value"           Repeatable.
                   --body TEXT                     Raw request body string.
-                  --body-file PATH                 Read request body from a file (overrides --body).
+                  --body-file PATH                 Read request body from a file; use instead of --body.
                   --content-type TYPE               Shorthand for --header "Content-Type: TYPE".
 
                 OUTPUT:
@@ -211,7 +218,7 @@ public final class ArgumentParser {
                   # Closed-loop: 50 virtual users hammering an endpoint for 1 minute
                   loadtester --url http://localhost:8080/ -c 50 -d 1m
 
-                  # Open-loop: sustain exactly 200 req/s for 2 minutes (coordinated-omission safe)
+                  # Open-loop: schedule 200 req/s for 2 minutes (capped arrivals are reported)
                   loadtester --url http://localhost:8080/ -r 200 -c 500 -d 2m
 
                   # Ramp from 0 to 300 req/s over 30s, then hold for the rest of a 3-minute test

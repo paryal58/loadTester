@@ -59,4 +59,9 @@ class DurationParserTest {
     void rejectsUnknownUnit() {
         assertThrows(IllegalArgumentException.class, () -> DurationParser.parse("30d"));
     }
+
+    @Test
+    void rejectsDurationsThatOverflowNanoseconds() {
+        assertThrows(IllegalArgumentException.class, () -> DurationParser.parse("10000000000h"));
+    }
 }

@@ -12,8 +12,8 @@ import java.util.Map;
  * @param totalRequests        total requests recorded (post-warmup)
  * @param successCount         requests with status < 400 and no transport error
  * @param errorCount           requests that failed (non-2xx/3xx or exception)
- * @param actualDuration        wall-clock duration over which totalRequests were recorded
- * @param throughputPerSecond    totalRequests / actualDuration.toSeconds() (as a double for sub-second precision)
+ * @param actualDuration        configured measurement-window duration
+ * @param throughputPerSecond    totalRequests / actualDuration in seconds
  * @param minLatencyNanos        fastest recorded request
  * @param p50LatencyNanos        median latency
  * @param p75LatencyNanos        75th percentile latency
@@ -25,9 +25,8 @@ import java.util.Map;
  * @param meanLatencyNanos       arithmetic mean latency
  * @param statusCodeCounts       count of requests per HTTP status code (-1 = no response received)
  * @param errorTypeCounts        count of requests per distinct error message/reason
- * @param dispatchDelaySamples   count of requests where the scheduler could not dispatch on time
- *                               (open-loop mode only; indicates the target could not sustain the
- *                               requested rate - see {@code OpenLoopRunner})
+ * @param dispatchDelaySamples   count of open-loop requests started more than 50ms after their scheduled time
+ * @param droppedRequests        scheduled open-loop arrivals skipped because the in-flight cap was full
  */
 public record TestResults(
         long totalRequests,
@@ -46,7 +45,8 @@ public record TestResults(
         double meanLatencyNanos,
         Map<Integer, Long> statusCodeCounts,
         Map<String, Long> errorTypeCounts,
-        long dispatchDelaySamples
+        long dispatchDelaySamples,
+        long droppedRequests
 ) {
 
     public double errorRate() {

@@ -1,112 +1,125 @@
 # Mini Load Tester
 
-Mini Load Tester is a small Java CLI for generating HTTP load against a target endpoint.
-It is useful for quick performance checks, simple benchmarking, and comparing how a service behaves under different traffic patterns.
+Mini Load Tester is a Java 17 command-line project for learning and demonstrating the mechanics behind HTTP load generation. It supports both closed-loop (concurrency-based) and open-loop (fixed-arrival-rate) tests, with no third-party runtime dependencies.
 
-## What it does
+This is a local, portfolio-focused project: it is intended to be built, read, tested, and run from source, not deployed as a service.
 
-The tool can:
+## Project goals
 
-- send HTTP requests to any URL using GET, POST, PUT, DELETE, PATCH, or HEAD
-- run in either closed-loop mode (fixed concurrency) or open-loop mode (fixed request rate)
-- apply ramp-up patterns such as constant, linear, step, and spike load
-- warm up the target before collecting results
-- send headers and request bodies
-- export results as JSON or CSV for later analysis
+- Keep the application runtime on the Java standard library (`java.net.http` and the JDK HTTP server).
+- Make the differences between closed-loop and open-loop traffic explicit.
+- Bound in-flight work and report open-loop arrivals that cannot be dispatched.
+- Keep the engine, HTTP client, metrics, reporting, and CLI in separate packages.
+- Use tests to document behavior and protect the load and measurement models.
 
-## Quick start
+Maven is used to compile and package the executable JAR; JUnit is test-scope only and is not bundled as a runtime dependency.
 
-Build the project:
+## Build and run
 
-```bash
-mvn clean package
-```
-
-Run a basic test against any HTTP endpoint:
+Requirements: JDK 17+ and Maven.
 
 ```bash
-java -jar target/mini-load-tester.jar --url https://example.com/health -c 50 -d 30s
+mvn test
+mvn package
+java -jar target/mini-load-tester.jar --url http://localhost:8080/ -c 50 -d 30s
 ```
 
-Or use the helper script:
+The helper script rebuilds the project before each run, then forwards its arguments:
 
 ```bash
-./run.sh --url https://example.com/health -c 50 -d 30s
+./run.sh --url http://localhost:8080/ -c 50 -d 30s
 ```
 
-## Choosing a load model
+## Load models
 
-Use the mode that matches the question you want to answer:
-
-- Closed-loop mode: good for asking, “How does the service behave with $N$ concurrent users?”
-- Open-loop mode: better for asking, “What does latency look like if I sustain $X$ requests per second?”
-
-Open-loop mode is usually the better choice for tail-latency and saturation analysis because it keeps sending requests on a schedule even when the target slows down.
-
-## Common options
+### Closed-loop
 
 ```bash
---url URL                 Target URL
---method METHOD           HTTP verb: GET, POST, PUT, DELETE, PATCH, HEAD
---concurrency, -c N       Virtual users or max in-flight requests
---rate, -r N              Target requests/second
---duration, -d DURATION   Test duration, e.g. 30s, 5m
---warmup DURATION         Warmup period excluded from results
---ramp-up SPEC            constant, linear, step, or spike
---header "Key: Value"     Repeatable request header
---body TEXT               Raw request body
---body-file PATH          Read request body from a file
---content-type TYPE       Shortcut for setting Content-Type
---output PATH             Write results to JSON or CSV
+java -jar target/mini-load-tester.jar --url http://localhost:8080/ -c 50 -d 30s
 ```
 
-## Example: sending a JSON request
+Each virtual user sends a request, waits for its response, then sends another request. Use this mode to ask how a service behaves with a fixed number of users. Throughput naturally falls as response times rise.
+
+### Open-loop
+
+```bash
+java -jar target/mini-load-tester.jar --url http://localhost:8080/ -r 200 -c 500 -d 2m
+```
+
+Requests are scheduled at the target rate independently of earlier response times. `--concurrency` is the maximum number of requests allowed in flight. When that cap is full, the scheduled arrival is skipped rather than queued; the final report and exported files include the dropped-arrival count. Increase the cap or lower the rate if arrivals are being dropped.
+
+Open-loop latency is measured from the scheduled arrival time through completion, so scheduler dispatch delay is not hidden. Closed-loop traffic does not provide this fixed-arrival-rate view and can under-represent latency during slowdowns (coordinated omission).
+
+## Options
+
+```text
+--url URL                  Target HTTP or HTTPS URL (required)
+--method METHOD            GET, POST, PUT, DELETE, PATCH, or HEAD (default: GET)
+--concurrency, -c N        Virtual users, or open-loop max in-flight (default: 10)
+--rate, -r N               Target requests per second; enables open-loop mode
+--duration, -d DURATION    Measurement duration, e.g. 30s, 5m, 1h (default: 30s)
+--warmup DURATION          Warmup traffic excluded from reported metrics (default: 0s)
+--ramp-up SPEC             constant, linear, step, or spike (default: constant)
+--timeout DURATION         Per-request timeout (default: 10s)
+--think-time DURATION      Delay between closed-loop requests per user (default: 0s)
+--header "Key: Value"      Add a request header; repeatable
+--body TEXT                UTF-8 request body
+--body-file PATH           Read request body from a file; mutually exclusive with --body
+--content-type TYPE        Shortcut for the Content-Type header
+--output PATH              Export results as .json or .csv
+--help, -h                 Show usage
+```
+
+Ramp-up uses the selected model's load unit (users in closed-loop, requests/second in open-loop):
+
+```text
+constant
+linear:<startValue>:<rampSeconds>
+step:<numSteps>:<stepSeconds>
+spike:<baselineValue>:<atSecond>:<spikeDurationSeconds>
+```
+
+Example: ramp from 0 to 300 requests/second over 30 seconds, then hold:
 
 ```bash
 java -jar target/mini-load-tester.jar \
-  --url https://api.example.com/orders \
-  --method POST \
-  --content-type application/json \
-  --body-file examples/sample-body.json \
-  -r 100 -c 200 -d 2m \
-  --output results.json
+  --url http://localhost:8080/ -r 300 -c 1000 -d 3m --ramp-up linear:0:30
 ```
 
-## Demo server
+## Local demo target
 
-A built-in demo target is included for local experimentation:
+The included JDK HTTP server simulates latency, jitter, errors, and a concurrency limit. Build first, then start it in one terminal:
 
 ```bash
 java -cp target/classes com.loadtester.testserver.DemoTargetServer \
   --port 8080 --latency-ms 30 --jitter-ms 15 --error-rate 0.01
 ```
 
-Then run the load tester against `http://localhost:8080/`.
+Run either load model against `http://localhost:8080/` from another terminal.
 
-## What the output includes
+## Results
 
-The tool reports basic performance metrics such as:
+The console and optional JSON/CSV export report completed request counts, errors, throughput, status codes, latency percentiles, scheduler delays, and dropped open-loop arrivals. Warmup results are excluded. Measured throughput uses the configured measurement window; requests started inside that window are allowed to finish before the final report is produced.
 
-- total requests sent
-- success and error counts
-- throughput
-- latency percentiles like p50, p90, p95, p99, and p99.9
+The latency histogram is a bounded-memory approximation, not a replacement for a production-grade benchmarking suite. Use a controlled environment and compare runs carefully; network, JVM warmup, host scheduling, and the load generator itself affect results.
 
-## Project layout
+## Layout
 
 ```text
 src/main/java/com/loadtester/
   Main.java          CLI entry point
-  cli/               argument parsing
-  config/            test configuration
-  engine/            load generation and ramp-up logic
-  http/              request execution
-  metrics/           latency and result aggregation
-  report/            console and file reporting
-  testserver/        demo HTTP target
+  cli/               argument parsing and usage
+  config/            immutable run configuration
+  engine/            open-/closed-loop runners and ramp-up
+  http/              JDK HTTP request execution
+  metrics/           bounded-memory latency and result aggregation
+  report/            console output and JSON/CSV export
+  testserver/        local demo HTTP target
+  util/              duration parsing, formatting, and thread factories
+src/test/java/        unit and behavior tests
 ```
 
-## Tests
+Run the test suite with:
 
 ```bash
 mvn test

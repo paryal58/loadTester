@@ -76,4 +76,10 @@ class RampUpStrategyTest {
     void rejectsNonNumericParameters() {
         assertThrows(IllegalArgumentException.class, () -> RampUpStrategy.parse("linear:abc:10", 100.0));
     }
+
+    @Test
+    void rejectsNonFiniteAndNegativeLoadValues() {
+        assertThrows(IllegalArgumentException.class, () -> RampUpStrategy.parse("linear:NaN:10", 100.0));
+        assertThrows(IllegalArgumentException.class, () -> RampUpStrategy.parse("spike:-1:2:3", 100.0));
+    }
 }
