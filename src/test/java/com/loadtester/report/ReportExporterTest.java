@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,5 +57,25 @@ class ReportExporterTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> ReportExporter.export(results, Path.of("report.txt")));
+    }
+
+    @Test
+    void csvIncludesCompactSortedStatusCodeBreakdown() throws Exception {
+        Path outputFile = Files.createTempDirectory("mini-load-tester-").resolve("result.csv");
+        TestResults results = new TestResults(
+                10, 8, 2, Duration.ofSeconds(1), 10,
+                0, 0, 0, 0, 0, 0, 0, 0, 0,
+                Map.of(500, 1L, 200, 8L, -1, 1L), Map.of(), 0, 0);
+
+        ReportExporter.export(results, outputFile);
+
+        String[] lines = Files.readString(outputFile).split("\\R");
+        String[] headers = lines[0].split(",", -1);
+        String[] values = lines[1].split(",", -1);
+        int statusCodesColumn = java.util.Arrays.asList(headers).indexOf("statusCodes");
+
+        assertTrue(statusCodesColumn >= 0);
+        assertTrue(values.length > statusCodesColumn);
+        assertEquals("no_response=1;200=8;500=1", values[statusCodesColumn]);
     }
 }

@@ -136,7 +136,7 @@ public final class ReportExporter {
                 "totalRequests", "successCount", "errorCount", "errorRatePercent",
                 "measuredDurationSeconds", "throughputPerSecond",
                 "minMs", "p50Ms", "p75Ms", "p90Ms", "p95Ms", "p99Ms", "p999Ms", "maxMs", "meanMs",
-                "dispatchDelaySamples", "droppedRequests");
+                "dispatchDelaySamples", "droppedRequests", "statusCodes");
 
         String row = String.join(",",
                 String.valueOf(r.totalRequests()),
@@ -155,9 +155,23 @@ public final class ReportExporter {
                 String.valueOf(round2(FormatUtils.nanosToMillis(r.maxLatencyNanos()))),
                 String.valueOf(round2(FormatUtils.nanosToMillis((long) r.meanLatencyNanos()))),
                 String.valueOf(r.dispatchDelaySamples()),
-                String.valueOf(r.droppedRequests())
+                String.valueOf(r.droppedRequests()),
+                formatStatusCodeBreakdown(r.statusCodeCounts())
         );
 
         return header + "\n" + row + "\n";
+    }
+
+    private static String formatStatusCodeBreakdown(Map<Integer, Long> statusCodeCounts) {
+        StringBuilder breakdown = new StringBuilder();
+        Map<Integer, Long> sorted = new java.util.TreeMap<>(statusCodeCounts);
+        for (Map.Entry<Integer, Long> entry : sorted.entrySet()) {
+            if (breakdown.length() > 0) {
+                breakdown.append(';');
+            }
+            String status = entry.getKey() == -1 ? "no_response" : String.valueOf(entry.getKey());
+            breakdown.append(status).append('=').append(entry.getValue());
+        }
+        return breakdown.toString();
     }
 }

@@ -35,7 +35,7 @@ A Java 17 CLI for exploring HTTP load testing. It supports closed-loop and open-
 | `--content-type TYPE` | Set the Content-Type header |
 | `--output PATH` | Export results as `.json` or `.csv` |
 
-Use `--help` for defaults and ramp-up syntax. Results include request counts, errors, throughput, status codes, and latency percentiles.
+Use `--help` for defaults and ramp-up syntax. Results include request counts, errors, throughput, status codes, and latency percentiles. CSV exports include a compact `statusCodes` column (for example, `200=98;500=2`; `no_response` represents requests without an HTTP response).
 
 ## Build and run
 
