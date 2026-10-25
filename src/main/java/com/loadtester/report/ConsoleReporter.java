@@ -20,12 +20,15 @@ public final class ConsoleReporter {
     private final MetricsCollector collector;
     private final long measurementStartNanos;
     private final long testEndNanos;
+    private final boolean openLoop;
     private ScheduledExecutorService ticker;
 
-    public ConsoleReporter(MetricsCollector collector, long measurementStartNanos, long testEndNanos) {
+    public ConsoleReporter(MetricsCollector collector, long measurementStartNanos, long testEndNanos,
+                           boolean openLoop) {
         this.collector = collector;
         this.measurementStartNanos = measurementStartNanos;
         this.testEndNanos = testEndNanos;
+        this.openLoop = openLoop;
     }
 
     /** Prints the startup banner for the test. */
@@ -85,6 +88,11 @@ public final class ConsoleReporter {
                 nanosToMillisString(snap.p50Nanos()) + "ms",
                 nanosToMillisString(snap.p95Nanos()) + "ms"
         );
+        if (openLoop) {
+            line += String.format(" dropped=%-6s delayed>50ms=%-6s",
+                    withThousandsSeparator(snap.droppedRequests()),
+                    withThousandsSeparator(snap.dispatchDelaySamples()));
+        }
         System.out.print(line);
     }
 

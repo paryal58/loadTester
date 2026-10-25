@@ -43,7 +43,8 @@ public final class LoadTestEngine {
         MetricsCollector collector = new MetricsCollector(testStartNanos, config.warmupDuration());
 
         ConsoleReporter.printBanner(config);
-        ConsoleReporter liveReporter = new ConsoleReporter(collector, testStartNanos + warmupNanos, testEndNanos);
+        ConsoleReporter liveReporter = new ConsoleReporter(collector, testStartNanos + warmupNanos, testEndNanos,
+                config.isOpenLoop());
         liveReporter.startLiveUpdates();
 
         try {

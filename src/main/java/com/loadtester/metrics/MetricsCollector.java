@@ -75,7 +75,9 @@ public final class MetricsCollector {
                 errorCount.sum(),
                 rps,
                 histogram.percentile(50),
-                histogram.percentile(95)
+                histogram.percentile(95),
+                dispatchDelaySamples.sum(),
+                droppedRequests.sum()
         );
     }
 
@@ -114,6 +116,7 @@ public final class MetricsCollector {
 
     /** Lightweight live-progress data for the console reporter. */
     public record LiveSnapshot(long totalRequests, long errorCount, double currentRps,
-                                long p50Nanos, long p95Nanos) {
+                                long p50Nanos, long p95Nanos,
+                                long dispatchDelaySamples, long droppedRequests) {
     }
 }
