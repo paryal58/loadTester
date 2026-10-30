@@ -3,6 +3,7 @@ package com.loadtester.cli;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArgumentParserTest {
 
@@ -25,5 +26,16 @@ class ArgumentParserTest {
     void reportsMalformedRampUpAsCliError() {
         assertThrows(CliParseException.class,
                 () -> ArgumentParser.parse(new String[]{"--url", "http://localhost/", "--ramp-up", "linear:-1:5"}));
+    }
+
+    @Test
+    void reportsExcessiveClosedLoopConcurrencyAsCliError() {
+        CliParseException exception = assertThrows(CliParseException.class, () ->
+                ArgumentParser.parse(new String[]{
+                        "--url", "http://localhost/",
+                        "--concurrency", String.valueOf(com.loadtester.config.TestConfig.MAX_CLOSED_LOOP_CONCURRENCY + 1)
+                }));
+
+        assertTrue(exception.getMessage().contains("Closed-loop concurrency must be <="));
     }
 }

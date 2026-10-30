@@ -14,7 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class ClosedLoopRunner {
 
-    private static final long IDLE_POLL_MILLIS = 50;
+    private static final long RAMP_UPDATE_MILLIS = 10;
+    private static final long IDLE_POLL_MILLIS = 10;
 
     private ClosedLoopRunner() {
     }
@@ -31,7 +32,7 @@ public final class ClosedLoopRunner {
         AtomicInteger currentAllowedConcurrency = new AtomicInteger(0);
         currentAllowedConcurrency.set(boundedConcurrency(rampUpStrategy.getTarget(0), maxUsers));
 
-        // Update the active worker count from the ramp-up curve every 100ms.
+        // Update the active worker count frequently enough to keep ramp transitions responsive.
         ExecutorService rampTicker = NamedDaemonThreads.newSingleThreadExecutor("ramp-ticker");
         ExecutorService workerPool = NamedDaemonThreads.newFixedThreadPool(maxUsers, "vu-worker");
         rampTicker.submit(() -> {
@@ -43,7 +44,7 @@ public final class ClosedLoopRunner {
                             : (now - measurementStartNanos) / 1_000_000;
                     currentAllowedConcurrency.set(
                             boundedConcurrency(rampUpStrategy.getTarget(elapsedMillis), maxUsers));
-                    Thread.sleep(100);
+                    Thread.sleep(RAMP_UPDATE_MILLIS);
                 }
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();

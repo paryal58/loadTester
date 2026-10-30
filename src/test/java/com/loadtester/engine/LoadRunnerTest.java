@@ -172,6 +172,54 @@ class LoadRunnerTest {
         }
     }
 
+    @Test
+    void closedLoopDrainsMultipleInFlightRequestsThatFinishAfterDeadline() throws Exception {
+        try (DemoServer server = new DemoServer(350)) {
+            TestConfig config = TestConfig.builder()
+                    .targetUrl(server.url())
+                    .concurrency(2)
+                    .testDuration(Duration.ofMillis(250))
+                    .requestTimeout(Duration.ofSeconds(2))
+                    .build();
+            RequestExecutor executor = new RequestExecutor(config);
+            long startNanos = System.nanoTime();
+            long endNanos = startNanos + config.testDuration().toNanos();
+            MetricsCollector collector = new MetricsCollector(startNanos, Duration.ZERO);
+
+            ClosedLoopRunner.run(config, RampUpStrategy.parse("constant", config.concurrency()),
+                    executor, collector, startNanos, startNanos, endNanos);
+
+            assertEquals(2, server.requestCount.get());
+            assertEquals(2, server.maxActive.get());
+            assertEquals(2, collector.finalResults(config.testDuration()).totalRequests());
+            assertTrue(System.nanoTime() - startNanos >= TimeUnit.MILLISECONDS.toNanos(300),
+                    "Runner should drain both in-flight requests after the measurement deadline");
+        }
+    }
+
+    @Test
+    void closedLoopRespondsToShortRampWindow() throws Exception {
+        try (DemoServer server = new DemoServer(0)) {
+            TestConfig config = TestConfig.builder()
+                    .targetUrl(server.url())
+                    .concurrency(1)
+                    .rampUpSpec("spike:0:0.07:0.03")
+                    .testDuration(Duration.ofMillis(160))
+                    .requestTimeout(Duration.ofSeconds(1))
+                    .build();
+            RequestExecutor executor = new RequestExecutor(config);
+            long startNanos = System.nanoTime();
+            long endNanos = startNanos + config.testDuration().toNanos();
+            MetricsCollector collector = new MetricsCollector(startNanos, Duration.ZERO);
+
+            ClosedLoopRunner.run(config, RampUpStrategy.parse(config.rampUpSpec(), config.peakLoadValue()),
+                    executor, collector, startNanos, startNanos, endNanos);
+
+            assertTrue(server.requestCount.get() > 0,
+                    "The ramp ticker and waiting virtual user should observe the brief load window");
+        }
+    }
+
     private static final class DemoServer implements AutoCloseable {
         private final HttpServer server;
         private final ExecutorService executor = Executors.newCachedThreadPool();

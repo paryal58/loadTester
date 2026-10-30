@@ -35,6 +35,8 @@ import java.util.regex.Pattern;
  */
 public final class TestConfig {
 
+    public static final int MAX_CLOSED_LOOP_CONCURRENCY = 10_000;
+
     private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     private final URI targetUrl;
@@ -138,6 +140,10 @@ public final class TestConfig {
 
             if (concurrency < 1) {
                 throw new IllegalArgumentException("Concurrency must be >= 1, got " + concurrency);
+            }
+            if (targetRate == null && concurrency > MAX_CLOSED_LOOP_CONCURRENCY) {
+                throw new IllegalArgumentException("Closed-loop concurrency must be <= "
+                        + MAX_CLOSED_LOOP_CONCURRENCY + ", got " + concurrency);
             }
             if (targetRate != null && (!Double.isFinite(targetRate) || targetRate <= 0)) {
                 throw new IllegalArgumentException("Rate must be > 0, got " + targetRate);

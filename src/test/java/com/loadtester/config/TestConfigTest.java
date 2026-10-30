@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TestConfigTest {
@@ -45,6 +47,36 @@ class TestConfigTest {
         assertThrows(IllegalArgumentException.class, () -> TestConfig.builder()
                 .targetUrl(URI.create("http://localhost/"))
                 .thinkTime(java.time.Duration.ofMillis(-1))
+                .build());
+    }
+
+    @Test
+    void rejectsClosedLoopConcurrencyAboveSafetyLimit() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                TestConfig.builder()
+                        .targetUrl(URI.create("http://localhost/"))
+                        .concurrency(TestConfig.MAX_CLOSED_LOOP_CONCURRENCY + 1)
+                        .build());
+
+        assertEquals("Closed-loop concurrency must be <= "
+                + TestConfig.MAX_CLOSED_LOOP_CONCURRENCY + ", got "
+                + (TestConfig.MAX_CLOSED_LOOP_CONCURRENCY + 1), exception.getMessage());
+    }
+
+    @Test
+    void openLoopInFlightLimitIsNotSubjectToClosedLoopConcurrencyCap() {
+        assertDoesNotThrow(() -> TestConfig.builder()
+                .targetUrl(URI.create("http://localhost/"))
+                .targetRate(1.0)
+                .concurrency(TestConfig.MAX_CLOSED_LOOP_CONCURRENCY + 1)
+                .build());
+    }
+
+    @Test
+    void acceptsClosedLoopConcurrencyAtSafetyLimit() {
+        assertDoesNotThrow(() -> TestConfig.builder()
+                .targetUrl(URI.create("http://localhost/"))
+                .concurrency(TestConfig.MAX_CLOSED_LOOP_CONCURRENCY)
                 .build());
     }
 }
