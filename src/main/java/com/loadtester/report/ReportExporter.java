@@ -51,6 +51,7 @@ public final class ReportExporter {
         appendJsonField(sb, "errorRatePercent", round2(r.errorRate() * 100), true);
         appendJsonField(sb, "measuredDurationSeconds", round2(r.actualDuration().toNanos() / 1_000_000_000.0), true);
         appendJsonField(sb, "throughputPerSecond", round2(r.throughputPerSecond()), true);
+        appendJsonField(sb, "missedArrivals", r.missedArrivals(), true);
         appendJsonField(sb, "droppedRequests", r.droppedRequests(), true);
 
         sb.append("  \"latencyMs\": {\n");
@@ -136,7 +137,7 @@ public final class ReportExporter {
                 "totalRequests", "successCount", "errorCount", "errorRatePercent",
                 "measuredDurationSeconds", "throughputPerSecond",
                 "minMs", "p50Ms", "p75Ms", "p90Ms", "p95Ms", "p99Ms", "p999Ms", "maxMs", "meanMs",
-                "dispatchDelaySamples", "droppedRequests", "statusCodes");
+                "dispatchDelaySamples", "missedArrivals", "droppedRequests", "statusCodes");
 
         String row = String.join(",",
                 String.valueOf(r.totalRequests()),
@@ -155,6 +156,7 @@ public final class ReportExporter {
                 String.valueOf(round2(FormatUtils.nanosToMillis(r.maxLatencyNanos()))),
                 String.valueOf(round2(FormatUtils.nanosToMillis((long) r.meanLatencyNanos()))),
                 String.valueOf(r.dispatchDelaySamples()),
+                String.valueOf(r.missedArrivals()),
                 String.valueOf(r.droppedRequests()),
                 formatStatusCodeBreakdown(r.statusCodeCounts())
         );

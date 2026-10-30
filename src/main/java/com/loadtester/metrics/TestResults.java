@@ -27,6 +27,7 @@ import java.util.Map;
  * @param errorTypeCounts        count of requests per distinct error message/reason
  * @param dispatchDelaySamples   count of open-loop requests started more than 50ms after their scheduled time
  * @param droppedRequests        scheduled open-loop arrivals skipped because the in-flight cap was full
+ * @param missedArrivals         scheduled open-loop arrivals skipped because the scheduler was late or the deadline passed
  */
 public record TestResults(
         long totalRequests,
@@ -46,7 +47,8 @@ public record TestResults(
         Map<Integer, Long> statusCodeCounts,
         Map<String, Long> errorTypeCounts,
         long dispatchDelaySamples,
-        long droppedRequests
+        long droppedRequests,
+        long missedArrivals
 ) {
 
     public double errorRate() {

@@ -2,7 +2,6 @@ package com.loadtester.engine;
 
 import com.loadtester.config.TestConfig;
 import com.loadtester.http.RequestExecutor;
-import com.loadtester.http.RequestOutcome;
 import com.loadtester.metrics.MetricsCollector;
 import com.loadtester.util.NamedDaemonThreads;
 
@@ -46,8 +45,7 @@ public final class OpenLoopRunner {
                     break;
                 }
 
-                sleepUntil(nextSendTimeNanos);
-                if (System.nanoTime() >= testEndNanos) {
+                if (!sleepUntil(nextSendTimeNanos, testEndNanos)) {
                     break;
                 }
 
@@ -66,6 +64,23 @@ public final class OpenLoopRunner {
                     continue;
                 }
                 long intervalNanos = Math.max(1L, (long) (1_000_000_000.0 / currentRate));
+
+                now = System.nanoTime();
+                if (now >= testEndNanos) {
+                    if (intendedSendTime < testEndNanos) {
+                        collector.recordMissed(intendedSendTime, 1);
+                    }
+                    break;
+                }
+
+                // Allow sub-interval wake-up jitter, but never send a catch-up burst
+                // when the scheduler is at least one complete interval behind.
+                long missedSlots = missedSlots(intendedSendTime, now, intervalNanos);
+                if (missedSlots > 0) {
+                    collector.recordMissed(intendedSendTime, missedSlots);
+                    nextSendTimeNanos += missedSlots * intervalNanos;
+                    continue;
+                }
                 nextSendTimeNanos += intervalNanos;
 
                 if (!inFlightPermits.tryAcquire()) {
@@ -73,10 +88,18 @@ public final class OpenLoopRunner {
                     continue;
                 }
 
+                if (System.nanoTime() >= testEndNanos) {
+                    inFlightPermits.release();
+                    collector.recordMissed(intendedSendTime, 1);
+                    break;
+                }
+
                 dispatchPool.submit(() -> {
                     try {
-                        RequestOutcome outcome = executor.execute(intendedSendTime);
-                        collector.recordOutcome(outcome);
+                        executor.execute(intendedSendTime, testEndNanos)
+                                .ifPresentOrElse(
+                                        collector::recordOutcome,
+                                        () -> collector.recordMissed(intendedSendTime, 1));
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     } finally {
@@ -100,15 +123,27 @@ public final class OpenLoopRunner {
         }
     }
 
+    static long missedSlots(long intendedSendTimeNanos, long nowNanos, long intervalNanos) {
+        long latenessNanos = nowNanos - intendedSendTimeNanos;
+        return latenessNanos < intervalNanos ? 0 : latenessNanos / intervalNanos;
+    }
+
     /**
-     * Waits until the next scheduled send time.
+     * Waits until the next scheduled send time or the test deadline.
      */
-    private static void sleepUntil(long targetNanoTime) throws InterruptedException {
-        long remaining = targetNanoTime - System.nanoTime();
+    static boolean sleepUntil(long targetNanoTime, long testEndNanos) throws InterruptedException {
+        long now = System.nanoTime();
+        long remaining = targetNanoTime - now;
+        long remainingUntilEnd = testEndNanos - now;
+        if (remainingUntilEnd <= 0) {
+            return false;
+        }
         if (remaining <= 0) {
-            return;
+            return true;
         }
 
+        long wakeTime = remaining <= remainingUntilEnd ? targetNanoTime : testEndNanos;
+        remaining = wakeTime - System.nanoTime();
         long coarseWaitNanos = remaining - SPIN_THRESHOLD_NANOS;
         if (coarseWaitNanos > 0) {
             long millis = coarseWaitNanos / 1_000_000L;
@@ -117,9 +152,11 @@ public final class OpenLoopRunner {
         }
 
         // Use a short spin for the last millisecond to reduce scheduling jitter.
-        while (System.nanoTime() < targetNanoTime) {
+        while (System.nanoTime() < wakeTime) {
             LockSupport.parkNanos(10_000); // 10 microseconds between checks
         }
+        long afterWait = System.nanoTime();
+        return afterWait < testEndNanos && afterWait - targetNanoTime >= 0;
     }
 
 }

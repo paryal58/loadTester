@@ -13,12 +13,79 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoadRunnerTest {
+
+    @Test
+    void openLoopSchedulerStopsWaitingWhenNextArrivalIsAfterDeadline() throws Exception {
+        long startNanos = System.nanoTime();
+        long testEndNanos = startNanos + TimeUnit.MILLISECONDS.toNanos(100);
+
+        boolean scheduledTimeReached = OpenLoopRunner.sleepUntil(
+                startNanos + TimeUnit.SECONDS.toNanos(5), testEndNanos);
+
+        assertFalse(scheduledTimeReached);
+        assertTrue(System.nanoTime() - startNanos < TimeUnit.SECONDS.toNanos(1),
+                "Scheduler should wake at the test deadline, not at the next arrival");
+    }
+
+    @Test
+    void openLoopSkipsOverdueSlotsWithoutSendingCatchUpBursts() {
+        long startNanos = 1_000_000_000L;
+        long intervalNanos = TimeUnit.MILLISECONDS.toNanos(10);
+
+        assertEquals(0, OpenLoopRunner.missedSlots(
+                startNanos, startNanos + intervalNanos - 1, intervalNanos));
+        assertEquals(1, OpenLoopRunner.missedSlots(
+                startNanos, startNanos + intervalNanos, intervalNanos));
+        assertEquals(3, OpenLoopRunner.missedSlots(
+                startNanos, startNanos + TimeUnit.MILLISECONDS.toNanos(35), intervalNanos));
+    }
+
+    @Test
+    void openLoopDoesNotStartRequestsAfterDeadlineAndDrainsInFlightRequests() throws Exception {
+        try (DemoServer server = new DemoServer(100)) {
+            TestConfig config = TestConfig.builder()
+                    .targetUrl(server.url())
+                    .targetRate(20.0)
+                    .concurrency(2)
+                    .testDuration(Duration.ofMillis(30))
+                    .requestTimeout(Duration.ofSeconds(1))
+                    .build();
+            RequestExecutor executor = new RequestExecutor(config);
+            long startNanos = System.nanoTime();
+            long endNanos = startNanos + config.testDuration().toNanos();
+            MetricsCollector collector = new MetricsCollector(startNanos, Duration.ZERO);
+
+            OpenLoopRunner.run(config, RampUpStrategy.parse("constant", 20.0), executor,
+                    collector, startNanos, startNanos, endNanos);
+
+            assertEquals(1, server.requestCount.get());
+            assertEquals(1, collector.finalResults(config.testDuration()).totalRequests());
+            assertTrue(System.nanoTime() - startNanos >= TimeUnit.MILLISECONDS.toNanos(80),
+                    "Runner should wait for the in-flight request after the measurement deadline");
+        }
+    }
+
+    @Test
+    void requestWorkerDoesNotSendWhenItsDeadlineHasPassed() throws Exception {
+        try (DemoServer server = new DemoServer(0)) {
+            TestConfig config = TestConfig.builder()
+                    .targetUrl(server.url())
+                    .requestTimeout(Duration.ofSeconds(1))
+                    .build();
+            RequestExecutor executor = new RequestExecutor(config);
+
+            assertTrue(executor.execute(System.nanoTime(), System.nanoTime() - 1).isEmpty());
+            assertEquals(0, server.requestCount.get());
+        }
+    }
 
     @Test
     void openLoopSkipsArrivalsAtTheInFlightLimitWithoutExceedingIt() throws Exception {

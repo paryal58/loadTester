@@ -17,6 +17,7 @@ public final class MetricsCollector {
     private final LongAdder successCount = new LongAdder();
     private final LongAdder errorCount = new LongAdder();
     private final LongAdder droppedRequests = new LongAdder();
+    private final LongAdder missedArrivals = new LongAdder();
     private final LongAdder dispatchDelaySamples = new LongAdder();
     private final ConcurrentHashMap<Integer, LongAdder> statusCodeCounts = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LongAdder> errorTypeCounts = new ConcurrentHashMap<>();
@@ -65,6 +66,16 @@ public final class MetricsCollector {
         }
     }
 
+    /** Records open-loop arrivals skipped because the scheduler was late or the deadline passed. */
+    public void recordMissed(long intendedSendTimeNanos, long count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("Missed arrival count cannot be negative");
+        }
+        if (intendedSendTimeNanos >= warmupEndNanos) {
+            missedArrivals.add(count);
+        }
+    }
+
     /** Returns a lightweight snapshot for the live console line. */
     public LiveSnapshot liveSnapshot(long nowNanos) {
         long elapsedNanos = Math.max(1, nowNanos - Math.max(testStartNanos, warmupEndNanos));
@@ -77,7 +88,8 @@ public final class MetricsCollector {
                 histogram.percentile(50),
                 histogram.percentile(95),
                 dispatchDelaySamples.sum(),
-                droppedRequests.sum()
+                droppedRequests.sum(),
+                missedArrivals.sum()
         );
     }
 
@@ -104,7 +116,8 @@ public final class MetricsCollector {
                 snapshotMap(statusCodeCounts),
                 snapshotMap(errorTypeCounts),
                 dispatchDelaySamples.sum(),
-                droppedRequests.sum()
+                droppedRequests.sum(),
+                missedArrivals.sum()
         );
     }
 
@@ -117,6 +130,6 @@ public final class MetricsCollector {
     /** Lightweight live-progress data for the console reporter. */
     public record LiveSnapshot(long totalRequests, long errorCount, double currentRps,
                                 long p50Nanos, long p95Nanos,
-                                long dispatchDelaySamples, long droppedRequests) {
+                                long dispatchDelaySamples, long droppedRequests, long missedArrivals) {
     }
 }

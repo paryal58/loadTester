@@ -11,7 +11,7 @@ A Java 17 CLI for exploring HTTP load testing. It supports closed-loop and open-
 -c 50 -d 30s
 ```
 
-**Open-loop** (`-r`): schedules requests at a target rate. `-c` sets the maximum in-flight requests. Arrivals are skipped—not queued—when the cap is full, and the report shows the drop count.
+**Open-loop** (`-r`): schedules requests at a target rate. `-c` sets the maximum in-flight requests. Arrivals are skipped—not queued—when the cap is full. If the scheduler falls at least one arrival interval behind, overdue arrivals are skipped rather than sent as a catch-up burst; sub-interval scheduling jitter is allowed. The report distinguishes these missed arrivals from cap-dropped arrivals. No new request starts after the measurement deadline, but in-flight requests are allowed to finish before the final report (subject to the request timeout).
 
 ```bash
 -r 200 -c 500 -d 2m

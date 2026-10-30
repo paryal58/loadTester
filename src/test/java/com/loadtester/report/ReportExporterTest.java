@@ -36,6 +36,7 @@ class ReportExporterTest {
                 Map.of(200, 9L),
                 Map.of("bad\nerror", 1L),
                 0L,
+                0L,
                 0L
         );
 
@@ -46,6 +47,7 @@ class ReportExporterTest {
         assertTrue(report.contains("\"totalRequests\""));
         assertTrue(report.contains("\"bad\\nerror\""));
         assertTrue(report.contains("\"droppedRequests\": 0"));
+        assertTrue(report.contains("\"missedArrivals\": 0"));
     }
 
     @Test
@@ -53,7 +55,7 @@ class ReportExporterTest {
         TestResults results = new TestResults(
                 0, 0, 0, Duration.ofSeconds(1), 0,
                 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                Map.of(), Map.of(), 0, 0);
+                Map.of(), Map.of(), 0, 0, 0);
 
         assertThrows(IllegalArgumentException.class,
                 () -> ReportExporter.export(results, Path.of("report.txt")));
@@ -65,7 +67,7 @@ class ReportExporterTest {
         TestResults results = new TestResults(
                 10, 8, 2, Duration.ofSeconds(1), 10,
                 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                Map.of(500, 1L, 200, 8L, -1, 1L), Map.of(), 0, 0);
+                Map.of(500, 1L, 200, 8L, -1, 1L), Map.of(), 0, 0, 0);
 
         ReportExporter.export(results, outputFile);
 
@@ -73,9 +75,12 @@ class ReportExporterTest {
         String[] headers = lines[0].split(",", -1);
         String[] values = lines[1].split(",", -1);
         int statusCodesColumn = java.util.Arrays.asList(headers).indexOf("statusCodes");
+        int missedArrivalsColumn = java.util.Arrays.asList(headers).indexOf("missedArrivals");
 
         assertTrue(statusCodesColumn >= 0);
+        assertTrue(missedArrivalsColumn >= 0);
         assertTrue(values.length > statusCodesColumn);
+        assertEquals("0", values[missedArrivalsColumn]);
         assertEquals("no_response=1;200=8;500=1", values[statusCodesColumn]);
     }
 }

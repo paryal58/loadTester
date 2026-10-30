@@ -89,8 +89,9 @@ public final class ConsoleReporter {
                 nanosToMillisString(snap.p95Nanos()) + "ms"
         );
         if (openLoop) {
-            line += String.format(" dropped=%-6s delayed>50ms=%-6s",
+            line += String.format(" dropped=%-6s missed=%-6s delayed>50ms=%-6s",
                     withThousandsSeparator(snap.droppedRequests()),
+                    withThousandsSeparator(snap.missedArrivals()),
                     withThousandsSeparator(snap.dispatchDelaySamples()));
         }
         System.out.print(line);
@@ -107,6 +108,7 @@ public final class ConsoleReporter {
         System.out.printf("%-28s %s (%s)%n", "Errors:", withThousandsSeparator(results.errorCount()), percentage(results.errorRate()));
         if (config.isOpenLoop()) {
             System.out.printf("%-28s %s%n", "Dropped arrivals:", withThousandsSeparator(results.droppedRequests()));
+            System.out.printf("%-28s %s%n", "Missed arrivals:", withThousandsSeparator(results.missedArrivals()));
         }
         System.out.printf("%-28s %s%n", "Measured duration:", formatDuration(results.actualDuration()));
         System.out.printf("%-28s %s req/s%n", "Throughput:", decimal(results.throughputPerSecond(), 2));
@@ -151,6 +153,13 @@ public final class ConsoleReporter {
             System.out.println("WARNING: " + withThousandsSeparator(results.droppedRequests())
                     + " scheduled arrivals were skipped because the max in-flight cap was full.");
             System.out.println("Increase --concurrency or lower --rate to avoid dropped arrivals.");
+        }
+
+        if (config.isOpenLoop() && results.missedArrivals() > 0) {
+            System.out.println();
+            System.out.println("WARNING: " + withThousandsSeparator(results.missedArrivals())
+                    + " scheduled arrivals were skipped because the scheduler was late or the test deadline passed.");
+            System.out.println("The runner skips overdue arrivals instead of sending catch-up bursts.");
         }
 
         System.out.println("=".repeat(70));

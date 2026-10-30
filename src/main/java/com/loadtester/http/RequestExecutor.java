@@ -7,9 +7,9 @@ import java.net.ConnectException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.Map;
 import java.net.http.HttpTimeoutException;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Sends individual HTTP requests with a shared HttpClient.
@@ -34,8 +34,22 @@ public final class RequestExecutor {
      * Executes one HTTP request and returns the outcome.
      */
     public RequestOutcome execute(long intendedSendTimeNanos) throws InterruptedException {
+        return execute(intendedSendTimeNanos, Long.MAX_VALUE)
+                .orElseThrow(() -> new IllegalStateException("Unbounded request execution was not started"));
+    }
+
+    /**
+     * Executes a request only if it can start before the supplied deadline.
+     *
+     * @return the request outcome, or empty if the deadline has passed
+     */
+    public Optional<RequestOutcome> execute(long intendedSendTimeNanos, long dispatchDeadlineNanos)
+            throws InterruptedException {
         HttpRequest request = buildRequest();
         long actualStartNanos = System.nanoTime();
+        if (actualStartNanos >= dispatchDeadlineNanos) {
+            return Optional.empty();
+        }
 
         try {
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
@@ -43,7 +57,7 @@ public final class RequestExecutor {
             int status = response.statusCode();
             boolean success = status < 400;
 
-            return new RequestOutcome(
+            return Optional.of(new RequestOutcome(
                     success,
                     status,
                     intendedSendTimeNanos,
@@ -51,15 +65,15 @@ public final class RequestExecutor {
                     actualEndNanos,
                     actualEndNanos - intendedSendTimeNanos,
                     success ? null : "HTTP " + status
-            );
+            ));
 
         } catch (HttpTimeoutException e) {
-            return failureOutcome(intendedSendTimeNanos, actualStartNanos, "timeout");
+            return Optional.of(failureOutcome(intendedSendTimeNanos, actualStartNanos, "timeout"));
         } catch (ConnectException e) {
-            return failureOutcome(intendedSendTimeNanos, actualStartNanos, "connection refused");
+            return Optional.of(failureOutcome(intendedSendTimeNanos, actualStartNanos, "connection refused"));
         } catch (IOException e) {
-            return failureOutcome(intendedSendTimeNanos, actualStartNanos,
-                    e.getClass().getSimpleName() + ": " + e.getMessage());
+            return Optional.of(failureOutcome(intendedSendTimeNanos, actualStartNanos,
+                    e.getClass().getSimpleName() + ": " + e.getMessage()));
         }
     }
 

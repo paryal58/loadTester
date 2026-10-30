@@ -15,16 +15,20 @@ class MetricsCollectorTest {
 
         collector.recordOutcome(outcome(1_099L, 1_500L));
         collector.recordDropped(1_099L);
+        collector.recordMissed(1_099L, 3);
         collector.recordOutcome(outcome(1_100L, 60_000_000L, 60_000_100L));
         collector.recordDropped(1_100L);
+        collector.recordMissed(1_100L, 2);
 
         TestResults results = collector.finalResults(Duration.ofSeconds(1));
         MetricsCollector.LiveSnapshot snapshot = collector.liveSnapshot(1_000_000_000L);
 
         assertEquals(1L, results.totalRequests());
         assertEquals(1L, results.droppedRequests());
+        assertEquals(2L, results.missedArrivals());
         assertEquals(1L, results.successCount());
         assertEquals(1L, snapshot.droppedRequests());
+        assertEquals(2L, snapshot.missedArrivals());
         assertEquals(1L, snapshot.dispatchDelaySamples());
     }
 
