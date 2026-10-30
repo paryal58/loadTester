@@ -5,7 +5,7 @@ A Java 17 CLI for exploring HTTP load testing. It supports closed-loop and open-
 
 ## Load models
 
-**Closed-loop** (`-c`): each virtual user waits for a response before sending another request.
+**Closed-loop** (`-c`): each virtual user waits for a response before sending another request. Think-time waits are capped by the test deadline, and no new request starts after it. Requests already in flight are allowed to finish before the final report, subject to the request timeout.
 
 ```bash
 -c 50 -d 30s

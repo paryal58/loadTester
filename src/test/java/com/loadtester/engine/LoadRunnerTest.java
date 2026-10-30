@@ -144,6 +144,34 @@ class LoadRunnerTest {
         }
     }
 
+    @Test
+    void closedLoopDoesNotWaitPastDeadlineForLongThinkTime() throws Exception {
+        try (DemoServer server = new DemoServer(100)) {
+            TestConfig config = TestConfig.builder()
+                    .targetUrl(server.url())
+                    .concurrency(1)
+                    .thinkTime(Duration.ofSeconds(5))
+                    .testDuration(Duration.ofMillis(30))
+                    .requestTimeout(Duration.ofSeconds(1))
+                    .build();
+            RequestExecutor executor = new RequestExecutor(config);
+            long startNanos = System.nanoTime();
+            long endNanos = startNanos + config.testDuration().toNanos();
+            MetricsCollector collector = new MetricsCollector(startNanos, Duration.ZERO);
+
+            ClosedLoopRunner.run(config, RampUpStrategy.parse("constant", config.concurrency()),
+                    executor, collector, startNanos, startNanos, endNanos);
+
+            assertEquals(1, server.requestCount.get());
+            assertEquals(1, collector.finalResults(config.testDuration()).totalRequests());
+            long elapsedNanos = System.nanoTime() - startNanos;
+            assertTrue(elapsedNanos >= TimeUnit.MILLISECONDS.toNanos(80),
+                    "Runner should allow the in-flight request to finish after the deadline");
+            assertTrue(elapsedNanos < TimeUnit.SECONDS.toNanos(1),
+                    "Runner should stop at the test deadline instead of sleeping for the full think time");
+        }
+    }
+
     private static final class DemoServer implements AutoCloseable {
         private final HttpServer server;
         private final ExecutorService executor = Executors.newCachedThreadPool();

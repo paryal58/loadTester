@@ -2,7 +2,6 @@ package com.loadtester.engine;
 
 import com.loadtester.config.TestConfig;
 import com.loadtester.http.RequestExecutor;
-import com.loadtester.http.RequestOutcome;
 import com.loadtester.metrics.MetricsCollector;
 import com.loadtester.util.NamedDaemonThreads;
 
@@ -75,28 +74,56 @@ public final class ClosedLoopRunner {
                                         long testEndNanos) {
         try {
             while (System.nanoTime() < warmupStartNanos) {
-                Thread.sleep(IDLE_POLL_MILLIS);
+                if (!sleepUntilOrDeadline(warmupStartNanos, testEndNanos)) {
+                    return;
+                }
             }
             while (System.nanoTime() < testEndNanos) {
                 if (workerId >= currentAllowedConcurrency.get()) {
                     // Wait until the ramp-up curve admits this worker.
-                    Thread.sleep(IDLE_POLL_MILLIS);
+                    long nextPollNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(IDLE_POLL_MILLIS);
+                    if (!sleepUntilOrDeadline(nextPollNanos, testEndNanos)) {
+                        break;
+                    }
                     continue;
                 }
 
                 // Send immediately when the worker is allowed to run.
                 long now = System.nanoTime();
-                RequestOutcome outcome = executor.execute(now);
-                collector.recordOutcome(outcome);
+                if (now >= testEndNanos) {
+                    break;
+                }
+                executor.execute(now, testEndNanos).ifPresent(collector::recordOutcome);
 
                 if (!config.thinkTime().isZero()) {
-                    long thinkTimeNanos = config.thinkTime().toNanos();
-                    Thread.sleep(thinkTimeNanos / 1_000_000L, (int) (thinkTimeNanos % 1_000_000L));
+                    long thinkTimeEndNanos = System.nanoTime() + config.thinkTime().toNanos();
+                    if (!sleepUntilOrDeadline(thinkTimeEndNanos, testEndNanos)) {
+                        break;
+                    }
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private static boolean sleepUntilOrDeadline(long targetNanoTime, long testEndNanos)
+            throws InterruptedException {
+        long now = System.nanoTime();
+        long remainingUntilEnd = testEndNanos - now;
+        if (remainingUntilEnd <= 0) {
+            return false;
+        }
+
+        long remainingUntilTarget = targetNanoTime - now;
+        if (remainingUntilTarget <= 0) {
+            return true;
+        }
+
+        long sleepNanos = Math.min(remainingUntilTarget, remainingUntilEnd);
+        Thread.sleep(sleepNanos / 1_000_000L, (int) (sleepNanos % 1_000_000L));
+        now = System.nanoTime();
+        return now < testEndNanos && now - targetNanoTime >= 0;
     }
 
     private static int boundedConcurrency(double requestedUsers, int maximumUsers) {
