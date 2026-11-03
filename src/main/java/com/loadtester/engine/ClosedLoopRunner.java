@@ -3,6 +3,7 @@ package com.loadtester.engine;
 import com.loadtester.config.TestConfig;
 import com.loadtester.http.RequestExecutor;
 import com.loadtester.metrics.MetricsCollector;
+import com.loadtester.util.ExecutorShutdown;
 import com.loadtester.util.NamedDaemonThreads;
 
 import java.util.concurrent.ExecutorService;
@@ -59,7 +60,8 @@ public final class ClosedLoopRunner {
             }
 
             workerPool.shutdown();
-            workerPool.awaitTermination(config.requestTimeout().toSeconds() + 5, TimeUnit.SECONDS);
+            ExecutorShutdown.awaitTermination(workerPool, config.requestTimeout().toSeconds() + 5,
+                    TimeUnit.SECONDS);
         } finally {
             workerPool.shutdownNow();
             rampTicker.shutdownNow();

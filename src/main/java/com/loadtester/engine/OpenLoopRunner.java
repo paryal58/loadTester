@@ -3,6 +3,7 @@ package com.loadtester.engine;
 import com.loadtester.config.TestConfig;
 import com.loadtester.http.RequestExecutor;
 import com.loadtester.metrics.MetricsCollector;
+import com.loadtester.util.ExecutorShutdown;
 import com.loadtester.util.NamedDaemonThreads;
 
 import java.util.concurrent.ExecutorService;
@@ -109,11 +110,8 @@ public final class OpenLoopRunner {
             }
 
             dispatchPool.shutdown();
-            boolean finished = dispatchPool.awaitTermination(
-                    config.requestTimeout().toSeconds() + 5, TimeUnit.SECONDS);
-            if (!finished) {
-                dispatchPool.shutdownNow();
-            }
+            ExecutorShutdown.awaitTermination(dispatchPool, config.requestTimeout().toSeconds() + 5,
+                    TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             dispatchPool.shutdownNow();
             throw e;
