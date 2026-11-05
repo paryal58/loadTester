@@ -130,4 +130,5 @@ The report includes request counts, errors, throughput, status codes, and latenc
 | `--output PATH` | Write a report; format comes from `.json` or `.csv` extension | `--output results.json` |
 | `--help` | Show all options, defaults, and ramp-up syntax | `java -jar target/mini-load-tester.jar --help` |
 
+## Sample Screenshot
 ![Demo](screenshot.png)
