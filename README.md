@@ -1,80 +1,133 @@
 # Mini Load Tester
 
-A Java 17 CLI for exploring HTTP load testing. It supports closed-loop and open-loop traffic and has no third-party runtime dependencies. Built as a local, portfolio-focused project—not a hosted service.
+A Java 17 command-line tool for exploring HTTP load testing. It supports closed-loop and open-loop traffic, and has no third-party runtime dependencies. This is a local, portfolio-focused project—not a hosted service.
 
+## Get started
 
-## Load models
+You need JDK 17 or newer and Maven. To try the tool against the included demo server:
 
-**Closed-loop** (`-c`): each virtual user waits for a response before sending another request. Ramp-up admission is refreshed about every 10 ms. Think-time waits are capped by the test deadline, and no new request starts after it. Requests already in flight are allowed to finish before the final report, subject to the request timeout.
+1. Build the project:
 
-```bash
--c 50 -d 30s
-```
+   ```bash
+   mvn package
+   ```
 
-**Open-loop** (`-r`): schedules requests at a target rate. `-c` sets the maximum in-flight requests. Arrivals are skipped—not queued—when the cap is full. If the scheduler falls at least one arrival interval behind, overdue arrivals are skipped rather than sent as a catch-up burst; sub-interval scheduling jitter is allowed. The report distinguishes these missed arrivals from cap-dropped arrivals. No new request starts after the measurement deadline, but in-flight requests are allowed to finish before the final report (subject to the request timeout).
+2. Start the demo server in one terminal:
 
-```bash
--r 200 -c 500 -d 2m
-```
+   ```bash
+   java -cp target/classes com.loadtester.testserver.DemoTargetServer \
+     --port 8080 --latency-ms 30 --jitter-ms 15 --error-rate 0.01
+   ```
 
-## Options
+3. In another terminal, run a 30-second test with 20 virtual users:
 
-| Option | Description |
-| --- | --- |
-| `--url URL` | Target HTTP(S) URL (required) |
-| `--method METHOD` | GET, POST, PUT, DELETE, PATCH, or HEAD |
-| `-c, --concurrency N` | Virtual users or max in-flight requests; closed-loop maximum: 10,000 |
-| `-r, --rate N` | Target requests per second; enables open-loop mode |
-| `-d, --duration TIME` | Measurement duration, e.g. `30s` or `2m` |
-| `--warmup TIME` | Warmup duration, excluded from results |
-| `--ramp-up SPEC` | `constant`, `linear`, `step`, or `spike` |
-| `--timeout TIME` | Per-request timeout |
-| `--think-time TIME` | Delay between closed-loop requests |
-| `--header "Key: Value"` | Add a request header (repeatable) |
-| `--body TEXT` / `--body-file PATH` | Set request body |
-| `--content-type TYPE` | Set the Content-Type header |
-| `--output PATH` | Export results as `.json` or `.csv` |
+   ```bash
+   java -jar target/mini-load-tester.jar \
+     --url http://localhost:8080/ -c 20 -d 30s
+   ```
 
-Use `--help` for defaults and ramp-up syntax. Results include request counts, errors, throughput, status codes, and latency percentiles. CSV exports include a compact `statusCodes` column (for example, `200=98;500=2`; `no_response` represents requests without an HTTP response).
+The report is printed when the test finishes. Use `--output results.json` or `--output results.csv` to save it to a file.
 
 ## Build and run
 
-Requires JDK 17+ and Maven.
+There are two ways to build and run the load tester:
+
+### 1. Run with the convenience script
+
+`run.sh` builds the project with Maven, then runs the load tester with the arguments you provide:
 
 ```bash
-mvn test
+./run.sh --url http://localhost:8080/ -c 20 -d 30s
+```
+
+The script rebuilds the project each time you run it.
+
+### 2. Build once, then run the JAR
+
+Build the executable JAR:
+
+```bash
 mvn package
 ```
 
-### Built-in demo server
-
-Start the included server in one terminal:
+Then run it as many times as needed:
 
 ```bash
-java -cp target/classes com.loadtester.testserver.DemoTargetServer \
-  --port 8080 --latency-ms 30 --jitter-ms 15 --error-rate 0.01
+java -jar target/mini-load-tester.jar \
+  --url http://localhost:8080/ -c 20 -d 30s
 ```
 
-In another terminal, run a test against it:
+Run the test suite with `mvn test`.
+
+## Choose a load model
+
+The load model is selected by whether you provide `-r`:
+
+- **Closed-loop** (no `-r`): `-c` sets the number of virtual users. Each user waits for a response before sending another request. For example, run 50 virtual users for one minute:
+
+  ```bash
+  ./run.sh --url http://localhost:8080/ -c 50 -d 1m
+  ```
+
+- **Open-loop** (include `-r`): `-r` sets the target requests per second, and `-c` caps the number of in-flight requests. Arrivals are skipped, not queued, when the cap is full. For example, target 200 requests per second for two minutes, with at most 500 requests in flight:
+
+  ```bash
+  ./run.sh --url http://localhost:8080/ -r 200 -c 500 -d 2m
+  ```
+
+For either model, ramp-up controls how the load increases. This example ramps to 300 requests per second over 30 seconds, then holds that target for the rest of the test:
 
 ```bash
-java -jar target/mini-load-tester.jar --url http://localhost:8080/ -c 20 -d 30s
+./run.sh --url http://localhost:8080/ -r 300 -c 1000 -d 3m \
+  --ramp-up linear:0:30
 ```
 
-### Your own API endpoint
+No new requests start after the measurement deadline. Requests already in flight can finish (subject to the request timeout) before the final report. In open-loop mode, arrivals skipped because the scheduler falls behind are reported separately from arrivals skipped because the in-flight cap is full.
 
-Use your endpoint URL in `--url`. For example, test a health endpoint:
+## Send a custom request
+
+By default, the tool sends a `GET` request. For an endpoint that needs authentication, add a header; repeat `--header` to send more than one:
 
 ```bash
-java -jar target/mini-load-tester.jar --url https://api.example.com/health -r 50 -c 100 -d 1m
+./run.sh --url https://api.example.com/health \
+  --header "Authorization: Bearer YOUR_TOKEN" \
+  -r 50 -c 100 -d 1m
 ```
 
-For an API that requires a JSON request body, provide a body file and headers:
+To send JSON, choose a method, provide the body (inline or from a file), and set its content type:
 
 ```bash
-java -jar target/mini-load-tester.jar --url https://api.example.com/orders \
+./run.sh --url https://api.example.com/orders \
   --method POST --content-type application/json \
   --body-file examples/sample-body.json -c 10 -d 30s
 ```
+
+To save the results, add an output path with a `.json` or `.csv` extension:
+
+```bash
+./run.sh --url http://localhost:8080/ -c 20 -d 30s \
+  --output results.csv
+```
+
+The report includes request counts, errors, throughput, status codes, and latency percentiles. CSV exports include a compact `statusCodes` column (for example, `200=98;500=2`); `no_response` represents requests without an HTTP response.
+
+## Options
+
+| Option | What it does | Example |
+| --- | --- | --- |
+| `--url URL` | Target HTTP(S) endpoint (required) | `--url http://localhost:8080/` |
+| `--method METHOD` | HTTP method; defaults to `GET` | `--method POST` |
+| `-c, --concurrency N` | Virtual users in closed-loop mode or max in-flight requests in open-loop mode; closed-loop maximum is 10,000 | `-c 50` |
+| `-r, --rate N` | Target requests per second; enables open-loop mode | `-r 200` |
+| `-d, --duration TIME` | Measurement duration, such as `30s` or `2m` | `-d 30s` |
+| `--warmup TIME` | Warm up before measurement; excluded from results | `--warmup 5s` |
+| `--ramp-up SPEC` | Ramp-up pattern: `constant`, `linear`, `step`, or `spike` | `--ramp-up linear:0:30` |
+| `--timeout TIME` | Maximum time to wait for each request | `--timeout 5s` |
+| `--think-time TIME` | Delay between requests from each virtual user (closed-loop only) | `--think-time 100ms` |
+| `--header "Key: Value"` | Add a request header; repeat to add more | `--header "X-Env: staging"` |
+| `--body TEXT` / `--body-file PATH` | Send a request body inline or read it from a file; use one, not both | `--body-file examples/sample-body.json` |
+| `--content-type TYPE` | Set the `Content-Type` header | `--content-type application/json` |
+| `--output PATH` | Write a report; format comes from `.json` or `.csv` extension | `--output results.json` |
+| `--help` | Show all options, defaults, and ramp-up syntax | `java -jar target/mini-load-tester.jar --help` |
 
 ![Demo](screenshot.png)
